@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "updated": "2026-10-18",
+  "source": "Rankomat.pl, tabela z 13.07.2026",
+  "note": "Przekroczenie liczone w km/h ponad limit, po odjęciu tolerancji. Od 31 km/h w ciągu 2 lat od poprzedniego wykroczenia mandat jest podwojony (repeatFine). Zmiany punktów zapowiadane na czerwiec 2026 nie są tu uwzględnione, bo źródła się rozjeżdżają.",
+  "bands": [
+    { "from": 1, "to": 10, "fine": 50, "points": 1 },
+    { "from": 11, "to": 15, "fine": 100, "points": 2 },
+    { "from": 16, "to": 20, "fine": 200, "points": 3 },
+    { "from": 21, "to": 25, "fine": 300, "points": 5 },
+    { "from": 26, "to": 30, "fine": 400, "points": 7 },
+    { "from": 31, "to": 40, "fine": 800, "points": 9, "repeatFine": 1600 },
+    { "from": 41, "to": 50, "fine": 1000, "points": 11, "repeatFine": 2000 },
+    { "from": 51, "to": 60, "fine": 1500, "points": 13, "repeatFine": 3000 },
+    { "from": 61, "to": 70, "fine": 2000, "points": 14, "repeatFine": 4000 },
+    { "from": 71, "to": null, "fine": 2500, "points": 15, "repeatFine": 5000 }
+  ]
+}

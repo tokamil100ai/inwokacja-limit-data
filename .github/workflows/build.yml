@@ -1,0 +1,70 @@
+name: Dane dróg (codziennie)
+
+on:
+  schedule:
+    - cron: '23 3 * * *'      # codziennie, po nocnej aktualizacji plików Geofabrik
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Pobranie Polski z Geofabrik
+        run: |
+          curl -fL --retry 6 --retry-delay 30 --retry-all-errors -o poland.osm.pbf https://download.geofabrik.de/europe/poland-latest.osm.pbf
+          curl -fL --retry 6 --retry-delay 10 -o poland.osm.pbf.md5 https://download.geofabrik.de/europe/poland-latest.osm.pbf.md5
+          echo "$(cut -d' ' -f1 poland.osm.pbf.md5)  poland.osm.pbf" | md5sum -c -
+          ls -l poland.osm.pbf
+
+      - name: Kompilacja programu budującego
+        run: |
+          mkdir -p build
+          javac -encoding UTF-8 -source 8 -target 8 -d build $(find src -name '*.java')
+
+      - name: Budowa paczek
+        run: |
+          mkdir -p site/v1
+          java -Xmx12g -cp build altergames.carlauncher.limit.tools.RdbBuilder poland.osm.pbf site/v1 2000
+
+      - name: Poprzednio opublikowany manifest
+        run: curl -fsSL -o previous-manifest.json "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/v1/manifest.json" || echo "brak poprzedniego manifestu"
+
+      - name: Kontrola sensowności wyniku
+        run: python3 scripts/check_manifest.py site/v1/manifest.json previous-manifest.json
+
+      - name: Tabela mandatów i strona informacyjna
+        run: |
+          cp penalties.json site/v1/penalties.json
+          cp site-index.html site/index.html
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
