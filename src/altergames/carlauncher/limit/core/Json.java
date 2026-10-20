@@ -37,7 +37,7 @@ public final class Json {
   private void ws() {
     while (i < s.length()) {
       char c = s.charAt(i);
-      if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '﻿') i++;
+      if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\uFEFF') i++;
       else break;
     }
   }

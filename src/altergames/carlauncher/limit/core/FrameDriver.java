@@ -1,76 +1,56 @@
 package altergames.carlauncher.limit.core;
 
 /**
- * Zamienia kolejne stany (UiState) na klatki animacji dla Paintera: wygładza rumieniec przekroczenia, pilnuje
- * wymiany znaku z efektem "ping" i wiek opaski. Czysta Java, więc da się ją testować bez Androida.
+ * Zamienia kolejne stany (UiState) na klatki dla Paintera i wygładza płynne przejścia z prototypu: czerwoną poświatę pod znakiem (0,6 s),
+ * odbarwienie nieświeżego znaku i poświatę przy mandacie (0,4 s), kolor kółka z prędkością (0,25 s). Sam znak i opaska zmieniają się
+ * natychmiast, bez animacji. Czysta Java, więc da się ją testować bez Androida.
  */
 public final class FrameDriver {
-  /** Stała czasowa wygładzania rumieńca: po 0,6 s zostaje kilka procent różnicy (jak w prototypie, ease 0,6 s). */
-  static final float OVER_TAU_MS = 200f;
-  static final long FACE_ANIM_MS = 700;
-  static final long RIBBON_ANIM_MS = 260;
+  /** Stałe czasowe wygładzania wykładniczego: po trzykrotności zostaje ok. 5% różnicy, co odpowiada czasom przejść w prototypie. */
+  static final float ALARM_TAU_MS = 200f, FADE_TAU_MS = 130f, BADGE_TAU_MS = 80f;
 
   private final Painter.Frame frame = new Painter.Frame();
-  private String faceKey;
-  private Painter.Face face, prev;
-  private long faceStart;
-  private boolean ping;
-  private float overShown;
   private long lastMs = -1;
-  private boolean bandActive;
-  private long bandStart;
-  private boolean animating = true;
+  private boolean animating;
 
   public FrameDriver() { frame.state = UiState.search(); }
 
   /** Następna klatka dla stanu s w chwili nowMs (ms, dowolny stały punkt odniesienia). Nie zgłasza wyjątków. */
   public Painter.Frame advance(UiState s, long nowMs) {
     if (s == null) s = UiState.search();
-    float dt = lastMs < 0 ? 0f : Math.max(0f, Math.min(250f, nowMs - lastMs));
+    float dt = lastMs < 0 ? -1f : Math.max(0f, Math.min(250f, nowMs - lastMs));
     lastMs = nowMs;
+    Painter.Frame f = frame;
 
-    // rumieniec: wygładzanie wykładnicze do wartości docelowej
-    float target = Math.max(0f, Math.min(1f, s.over));
-    float k = 1f - (float) Math.exp(-dt / OVER_TAU_MS);
-    overShown += (target - overShown) * k;
-    if (Math.abs(target - overShown) < 0.002f) overShown = target;
-
-    // znak: zmiana liczby/widoku to wymiana z animacją, zmiana samej szarości to podmiana w miejscu
-    String key = s.faceKey();
-    Painter.Face nf = Painter.Face.of(s);
-    if (faceKey == null) {
-      face = nf; faceKey = key; faceStart = Long.MIN_VALUE / 4; ping = false; prev = null;
-    } else if (!key.equals(faceKey)) {
-      prev = face;
-      face = nf;
-      faceKey = key;
-      faceStart = nowMs;
-      ping = s.view != UiState.View.SEARCH;
+    float alarmT = Painter.alarmTarget(s), grayT = Painter.grayTarget(s), glowT = Painter.glowTarget(s);
+    int bgT = Painter.badgeBgTarget(s), fgT = Painter.badgeFgTarget(s);
+    if (dt < 0) {                                                       // pierwsza klatka: od razu stan docelowy
+      f.alarm = alarmT; f.gray = grayT; f.glow = glowT; f.badgeBg = bgT; f.badgeFg = fgT;
     } else {
-      face = nf;
+      f.alarm = approach(f.alarm, alarmT, dt, ALARM_TAU_MS);
+      f.gray = approach(f.gray, grayT, dt, FADE_TAU_MS);
+      f.glow = approach(f.glow, glowT, dt, FADE_TAU_MS);
+      float kb = 1f - (float) Math.exp(-dt / BADGE_TAU_MS);
+      f.badgeBg = near(f.badgeBg, bgT) ? bgT : Painter.mix(f.badgeBg, bgT, kb);
+      f.badgeFg = near(f.badgeFg, fgT) ? fgT : Painter.mix(f.badgeFg, fgT, kb);
     }
-    long faceAge = nowMs - faceStart;
-    if (faceAge >= FACE_ANIM_MS) { prev = null; ping = false; }
-
-    // opaska: wiek liczony od chwili pojawienia się
-    boolean band = s.hasBand();
-    if (band && !bandActive) bandStart = nowMs;
-    bandActive = band;
-    long ribbonAge = band ? nowMs - bandStart : Long.MAX_VALUE;
-
-    frame.state = s;
-    frame.overShown = overShown;
-    frame.face = face;
-    frame.prevFace = prev;
-    frame.faceAgeMs = faceAge >= FACE_ANIM_MS ? Long.MAX_VALUE : faceAge;
-    frame.ping = ping;
-    frame.ribbonAgeMs = ribbonAge >= RIBBON_ANIM_MS ? Long.MAX_VALUE : ribbonAge;
-    frame.timeMs = nowMs;
-
-    animating = s.view == UiState.View.SEARCH || faceAge < FACE_ANIM_MS || ribbonAge < RIBBON_ANIM_MS || overShown != target;
-    return frame;
+    f.state = s;
+    animating = f.alarm != alarmT || f.gray != grayT || f.glow != glowT || f.badgeBg != bgT || f.badgeFg != fgT;
+    return f;
   }
 
-  /** Czy trwa animacja i trzeba rysować często (np. 30 razy na sekundę); w spokoju wystarczy rzadko. */
+  /** Czy trwa przejście i trzeba rysować często (np. 30 razy na sekundę); w spokoju wystarczy rzadko. */
   public boolean isAnimating() { return animating; }
+
+  private static float approach(float cur, float target, float dt, float tau) {
+    float k = 1f - (float) Math.exp(-dt / tau);
+    float v = cur + (target - cur) * k;
+    return Math.abs(target - v) < 0.002f ? target : v;
+  }
+
+  /** Kolory różniące się o niewiele na kanał uznajemy za równe, żeby przejście się kończyło. */
+  private static boolean near(int a, int b) {
+    for (int sh = 0; sh <= 24; sh += 8) if (Math.abs(((a >> sh) & 255) - ((b >> sh) & 255)) > 1) return false;
+    return true;
+  }
 }

@@ -19,7 +19,9 @@ public final class PackClient {
 
   public static final class Result {
     public final long size, crc;
-    Result(long size, long crc) { this.size = size; this.crc = crc; }
+    /** Pierwsze 128 bitów SHA-256 pobranej treści (32 znaki szesnastkowe). */
+    public final String sha;
+    Result(long size, long crc, String sha) { this.size = size; this.crc = crc; this.sha = sha; }
   }
 
   private final int connectMs, readMs;
@@ -53,6 +55,7 @@ public final class PackClient {
       if (expectedSize >= 0 && declared >= 0 && declared != expectedSize) throw new RoadSource.FetchException("inny rozmiar niż w manifeście: " + declared);
       long t0 = System.nanoTime();
       CRC32 crc = new CRC32();
+      java.security.MessageDigest sha = PackSigning.newSha256();
       long total = 0;
       InputStream in = c.getInputStream();
       FileOutputStream out = new FileOutputStream(dest);
@@ -65,6 +68,7 @@ public final class PackClient {
           if ((System.nanoTime() - t0) / 1_000_000L > totalMs) throw new RoadSource.FetchException("pobieranie trwa za długo");
           out.write(buf, 0, n);
           crc.update(buf, 0, n);
+          sha.update(buf, 0, n);
         }
       } finally {
         try { in.close(); } catch (IOException ignored) { /* nic */ }
@@ -73,7 +77,7 @@ public final class PackClient {
       if (declared >= 0 && total != declared) throw new RoadSource.FetchException("ucięta odpowiedź (" + total + " z " + declared + ")");
       if (expectedSize >= 0 && total != expectedSize) throw new RoadSource.FetchException("zły rozmiar: " + total);
       ok = true;
-      return new Result(total, crc.getValue());
+      return new Result(total, crc.getValue(), PackSigning.shortSha256(sha.digest()));
     } catch (RoadSource.FetchException e) {
       throw e;
     } catch (IOException e) {

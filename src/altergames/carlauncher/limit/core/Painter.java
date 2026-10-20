@@ -1,215 +1,154 @@
 package altergames.carlauncher.limit.core;
 
 /**
- * Rysowanie kółka. Odpowiednik prototypu webowego (app.js i style.css), w jednostkach logicznych:
- * średnica kółka to 477, początek współrzędnych w jego środku.
+ * Rysowanie kółka. Odpowiednik prototypu webowego (agama-view-web: src/widget_limit.js), w jednostkach logicznych:
+ * pole widżetu to 477, początek współrzędnych w jego środku. Znak leży bezpośrednio na tle ekranu głównego (bez własnej tarczy),
+ * a pod nim, przy dużym przekroczeniu, jest miękka czerwona poświata.
+ * Stan SEARCH (jeszcze nie ma GPS) rysuje wołający: to zwykłe logo auta, Painter nie rysuje wtedy nic.
  * Klasa jest czysta (bez Androida), więc te same współrzędne da się narysować i sprawdzić na komputerze.
  */
 public final class Painter {
   public static final float D = 477f;
   public static final float R = D / 2f;
 
-  /** Co jest narysowane na znaku: znak z liczbą, szary znak "?" albo ikona szukania GPS. */
-  public static final class Face {
-    public enum Kind { SIGN, UNKNOWN, SEARCH }
-    public final Kind kind;
-    public final int limit;
-    public final boolean stale;
-
-    public Face(Kind kind, int limit, boolean stale) { this.kind = kind; this.limit = limit; this.stale = stale; }
-
-    public static Face of(UiState s) {
-      switch (s.view) {
-        case SEARCH: return new Face(Kind.SEARCH, -1, false);
-        case FREE: return new Face(Kind.UNKNOWN, -1, false);
-        default: return new Face(Kind.SIGN, s.limit, s.stale);
-      }
-    }
-  }
-
-  /** Wszystko, czego Painter potrzebuje do jednej klatki. */
+  /** Wszystko, czego Painter potrzebuje do jednej klatki. Wartości płynne (poświata, odbarwienie, kolor kółka) liczy {@link FrameDriver}. */
   public static final class Frame {
     public UiState state = UiState.search();
-    public float overShown;          // wygładzony rumieniec przekroczenia 0..1
-    public Face face;                // aktualny wygląd środka
-    public Face prevFace;            // poprzedni (znika), może być null
-    public long faceAgeMs = Long.MAX_VALUE;   // czas od zmiany wyglądu
-    public boolean ping;             // czy pokazać pierścień "ping" po zmianie znaku
-    public long ribbonAgeMs = Long.MAX_VALUE; // czas od pojawienia się opaski
-    public long timeMs;              // do pulsowania ikony szukania
+    /** Krycie czerwonej poświaty pod znakiem, 0..1. */
+    public float alarm;
+    /** Odbarwienie znaku, 0..1 (1 = czarno-biały, dane nieświeże). */
+    public float gray;
+    /** Czerwona poświata wokół znaku przy mandacie, 0..1. */
+    public float glow;
+    /** Kolor tła i cyfr kółka z prędkością. */
+    public int badgeBg = DARK, badgeFg = WHITE;
+
+    /** Klatka w stanie ustalonym (bez płynnych przejść): dla podglądu i testów. */
+    public static Frame steady(UiState s) {
+      Frame f = new Frame();
+      f.state = s;
+      f.alarm = alarmTarget(s);
+      f.gray = grayTarget(s);
+      f.glow = glowTarget(s);
+      f.badgeBg = badgeBgTarget(s);
+      f.badgeFg = badgeFgTarget(s);
+      return f;
+    }
   }
 
   // kolory
   static final int WHITE = 0xFFFFFFFF;
   static final int INK = 0xFF111111;
   static final int SIGN_RED = 0xFFD7141A;
+  /** Pierścień znaku z danych lokalnych bez potwierdzenia na żywo (brak internetu albo nieświeże dane). */
+  static final int SIGN_ORANGE = 0xFFF28A0F;
   static final int AMBER = 0xFFFFB02E;
-  static final int GAUGE_AMBER = 0xFFFFB42A;
-  static final int GLYPH = 0xFFC9C9CF;
   static final int DARK = 0xFF17171A;
-  static final int UNKNOWN_RING = 0xFF8A8A92;
-  static final int UNKNOWN_INK = 0xFF4A4A51;
-
-  // kształt obwodu: łuk 240 stopni z przerwą na dole, znacznik limitu na 80%
-  static final float GAUGE_R = 47.8f * D / 100f;
-  static final float GAUGE_W = 1.7f * D / 100f;
-  static final float GAUGE_START = 150f, GAUGE_SWEEP = 240f, GAUGE_F0 = 0.8f;
+  static final int GREEN = 0xFF1F9D4D;
 
   static final float SIGN_D = 296f;
+  /** Przerywany pierścień limitu szacowanego: liczba kresek i jaka część okresu jest kreską. */
+  static final int DASHES = 12;
+  static final float DASH_ON = 0.65f;
+  static final float BADGE_R = 58f, BADGE_CX = 104f, BADGE_CY = -104f, BADGE_BORDER = 4f;
   static final float RIBBON_TOP = 60f;
   static final float RIBBON_RHO = 14f;
 
+  // czerwona poświata: gradient radialny "closest-side" w polu widżetu (pozycja 0..1, kolor)
+  static final float[] ALARM_POS = {0f, 0.55f, 0.74f, 0.90f, 1f};
+  static final int[] ALARM_COL = {
+      0xF2CE1A26, 0xEDC01622, 0xD6A2101C, 0x807A0C16, 0x0046080E};
+  /** Ta sama poświata w pomarańczowym odcieniu: przy znaku z danych lokalnych bez potwierdzenia na żywo (pomarańczowy pierścień). */
+  static final int[] ALARM_COL_ORANGE = {
+      0xF2F28A0F, 0xEDDC7A0A, 0xD6B45E08, 0x808A4605, 0x004F2E03};
+
+  /* ---------- wartości docelowe (wspólne dla klatki ustalonej i płynnej) ---------- */
+
+  static boolean known(UiState s) { return s.view == UiState.View.DRIVE && s.limit >= 0; }
+
+  static float alarmTarget(UiState s) { return s.severe ? 1f : 0f; }
+  static float grayTarget(UiState s) { return s.stale ? 1f : 0f; }
+  static float glowTarget(UiState s) { return s.hasBand() ? 1f : 0f; }
+
+  /** Zielone tło w limicie (od 0 do 10 km/h stopniowo z ciemnego), bursztynowe ponad limitem, ciemne gdy limit niepewny. */
+  static int badgeBgTarget(UiState s) {
+    if (!known(s) || s.speed < 0) return DARK;
+    if (s.speed > s.limit) return AMBER;
+    return mix(DARK, GREEN, Math.min(1f, s.speed / 10f));
+  }
+
+  static int badgeFgTarget(UiState s) { return known(s) && s.speed > s.limit ? INK : WHITE; }
+
   public void draw(Gfx g, Frame f) {
     UiState s = f.state;
-    drawDisc(g, f.overShown);
-    drawGauge(g, s);
-
-    // cień znaku i poświata przy przekroczeniu
-    if (s.view != UiState.View.SEARCH) g.halo(0, 6, SIGN_D / 2f, 14f, argb(0.5f, 0, 0, 0));
-    if (s.hasBand()) g.halo(0, 0, SIGN_D / 2f, 18f, argb(0.7f, 255, 64, 64));
-
-    drawFaces(g, f);
-    drawBadge(g, s);
-    drawRibbon(g, s, f.ribbonAgeMs);
-    drawBottom(g, s);
+    if (s.view == UiState.View.SEARCH) return;
+    if (f.alarm > 0.002f) drawAlarm(g, f.alarm, s.offline);
+    drawFace(g, f);
+    drawRibbon(g, s);
+    drawBadge(g, f);
   }
 
   /* ---------- tło ---------- */
 
-  void drawDisc(Gfx g, float over) {
-    float o = clamp01(over);
-    int inner = mix(0xFF232326, 0xFF9B111A, o);
-    int outer = mix(0xFF0C0C0E, 0xFF35060A, o);
-    g.fillCircleRadial(0, 0, R, 0, -0.14f * D, 0.812f * D, inner, outer);
-    g.innerShade(0, 0, R, (R - 38f) / R, argb(0.6f, 0, 0, 0));
+  void drawAlarm(Gfx g, float a, boolean offline) {
+    int[] base = offline ? ALARM_COL_ORANGE : ALARM_COL;
+    int[] c = new int[base.length];
+    for (int i = 0; i < c.length; i++) c[i] = scaleAlpha(base[i], a);
+    g.fillCircleStops(0, 0, R, ALARM_POS, c);
   }
 
-  void drawGauge(Gfx g, UiState s) {
-    boolean live = s.view == UiState.View.DRIVE || s.view == UiState.View.WEAK;
-    g.beginGroup(s.stale ? 0.55f : 1f, s.stale);
-    g.strokeArc(0, 0, GAUGE_R, GAUGE_START, GAUGE_SWEEP, GAUGE_W, argb(0.16f, 255, 255, 255), true);
-    if (live) {
-      float gp = clamp01(s.gauge);
-      if (gp > 0.004f) g.strokeArc(0, 0, GAUGE_R, GAUGE_START, Math.min(gp, GAUGE_F0) * GAUGE_SWEEP, GAUGE_W, WHITE, true);
-      float over = (gp - GAUGE_F0) * GAUGE_SWEEP;
-      if (over > 0.7f) g.strokeArc(0, 0, GAUGE_R, GAUGE_START + GAUGE_F0 * GAUGE_SWEEP, over, GAUGE_W, GAUGE_AMBER, true);
-      double a = Math.toRadians(GAUGE_START + GAUGE_F0 * GAUGE_SWEEP);
-      float r1 = 43.4f * D / 100f, r2 = 49.6f * D / 100f;
-      g.strokeLine((float) (r1 * Math.cos(a)), (float) (r1 * Math.sin(a)),
-          (float) (r2 * Math.cos(a)), (float) (r2 * Math.sin(a)), 1.5f * D / 100f, WHITE, true);
-    }
+  /** Miękki cień koła o promieniu r: jak rozmycie gaussowskie o promieniu blur (połowa krycia na krawędzi, zanik do r + blur). */
+  void softShadow(Gfx g, float cx, float cy, float r, float blur, int argb) {
+    final float[] k = {0.977f, 0.84f, 0.5f, 0.16f, 0.023f, 0f};   // 1 - Phi(x / sigma), x = -blur, -blur/2, 0, blur/2, blur*0.75, blur
+    float total = r + blur;
+    float[] pos = {0f, (r - blur) / total, (r - blur / 2f) / total, r / total, (r + blur / 2f) / total, 1f};
+    int[] col = new int[pos.length];
+    for (int i = 0; i < pos.length; i++) col[i] = scaleAlpha(argb, k[i]);
+    g.fillCircleStops(cx, cy, total, pos, col);
+  }
+
+  /* ---------- znak ---------- */
+
+  void drawFace(Gfx g, Frame f) {
+    UiState s = f.state;
+    // cień znaku (jak drop-shadow 0 6 14 w prototypie); przy mandacie dochodzi czerwona poświata wokół znaku
+    softShadow(g, 0, 6, SIGN_D / 2f, 14f, argb(0.5f, 0, 0, 0));
+    if (f.glow > 0.002f) softShadow(g, 0, 0, SIGN_D / 2f, 18f, argb(0.7f * f.glow, 255, 64, 64));
+    g.beginGroup(1f, f.gray);
+    if (s.view == UiState.View.FREE) drawSign(g, "?", 56f, false, SIGN_RED);
+    else drawSign(g, Integer.toString(s.limit), -1f, s.estimated, s.offline ? SIGN_ORANGE : SIGN_RED);
     g.endGroup();
   }
 
-  /* ---------- środek ---------- */
-
-  void drawFaces(Gfx g, Frame f) {
-    long age = f.faceAgeMs;
-    if (f.prevFace != null && age < 220) {
-      float t = age / 220f, p = t * t;                        // wyjście: przyspieszenie
-      drawFace(g, f.prevFace, 1f + 0.12f * p, 1f - p, f.timeMs);
-    }
-    float scale = 1f, alpha = 1f;
-    if (age < 380) {
-      float p = easeOutBack(age / 380f);
-      scale = 0.8f + 0.2f * p;
-      alpha = clamp01(p);
-    }
-    if (f.face != null) drawFace(g, f.face, scale, alpha, f.timeMs);
-    if (f.ping && age < 700) {
-      float t = age / 700f, e = 1f - (1f - t) * (1f - t);   // ease-out
-      float sc = 1f + 0.38f * e;
-      g.strokeCircle(0, 0, (SIGN_D / 2f + 2f) * sc, 4f * sc, argb(0.85f * (1f - e), 255, 255, 255));
-    }
-  }
-
-  void drawFace(Gfx g, Face face, float scale, float alpha, long timeMs) {
-    if (alpha <= 0.002f) return;
-    g.save();
-    g.scale(scale);
-    switch (face.kind) {
-      case SIGN:
-        g.beginGroup(alpha, face.stale);
-        drawSign(g, face.limit);
-        g.endGroup();
-        break;
-      case UNKNOWN:
-        g.beginGroup(alpha, false);
-        drawUnknown(g);
-        g.endGroup();
-        break;
-      default: {
-        // ikona szukania: wolne, delikatne pulsowanie (3,4 s) między 0,75 a 0,35
-        double ph = (timeMs % 3400L) / 3400.0;
-        float a = (float) (0.55 + 0.20 * Math.cos(2 * Math.PI * ph));
-        glyph(g, 'S', 0, 0, 109f / 84f, argb(a * alpha, 0xC9, 0xC9, 0xCF));
-      }
-    }
-    g.restore();
-  }
-
-  void drawSign(Gfx g, int limit) {
-    String t = Integer.toString(limit);
+  /**
+   * Znak ograniczenia (B-33): biała tarcza z czerwonym pierścieniem i czarną liczbą; fs < 0 oznacza rozmiar zależny od długości liczby.
+   * Limit szacowany (nie ze znaku ani jawnego wpisu, tylko wyliczony z rodzaju drogi) ma pierścień przerywany: bez żadnego napisu widać, że nie jest pewny.
+   */
+  void drawSign(Gfx g, String t, float fs100, boolean dashed, int ring) {
     float u = SIGN_D / 100f;                  // jednostka znaku w jednostkach logicznych
-    float fs = (t.length() >= 3 ? 36f : t.length() == 2 ? 47f : 56f) * u;
+    float fs = (fs100 > 0 ? fs100 : (t.length() >= 3 ? 36f : t.length() == 2 ? 47f : 56f)) * u;
     g.fillCircle(0, 0, 50f * u, WHITE);
-    g.fillCircle(0, 0, 41.5f * u + 5.5f * u, SIGN_RED);
-    g.fillCircle(0, 0, 41.5f * u - 5.5f * u, WHITE);
-    g.text(t, 0, 0.35f * fs, fs, INK);
-  }
-
-  void drawUnknown(Gfx g) {
-    // jak znak drogowy z limitem (ta sama tarcza i grubość pierścienia), ale pierścień szary, a w środku "?":
-    // od razu widać, że to nie limit, tylko brak informacji
-    float u = SIGN_D / 100f;
-    g.fillCircle(0, 0, 50f * u, WHITE);
-    g.fillCircle(0, 0, 41.5f * u + 5.5f * u, UNKNOWN_RING);
-    g.fillCircle(0, 0, 41.5f * u - 5.5f * u, WHITE);
-    float fs = 56f * u;
-    g.text("?", 0, 0.35f * fs, fs, UNKNOWN_INK);
-  }
-
-  /** Ikona lokalizacji w układzie 100x100 (ramka 8..92), kind: 'S' szukanie, 'W' słaby, 'L' utracony (przekreślony). */
-  void glyph(Gfx g, char kind, float cx, float cy, float s, int argb) {
-    g.save();
-    g.translate(cx, cy);
-    g.scale(s);
-    g.translate(-50f, -50f);
-    float w = 6f;
-    if (kind == 'W') {
-      // przerywany okrąg: 9 kreski, 7,5 przerwy (jednostki ikony) na promieniu 24
-      double onDeg = Math.toDegrees(9.0 / 24.0), offDeg = Math.toDegrees(7.5 / 24.0);
-      for (double a = 0; a < 360 - 1; a += onDeg + offDeg) {
-        g.strokeArc(50, 50, 24, (float) a, (float) Math.min(onDeg, 360 - a), w, argb, true);
-      }
+    if (dashed) {
+      g.strokeDashedCircle(0, 0, 41.5f * u, 11f * u, DASHES, DASH_ON, ring);
     } else {
-      g.strokeCircle(50, 50, 24, w, argb);
+      g.fillCircle(0, 0, 41.5f * u + 5.5f * u, ring);
+      g.fillCircle(0, 0, 41.5f * u - 5.5f * u, WHITE);
     }
-    g.strokeLine(50, 8, 50, 22, w, argb, true);
-    g.strokeLine(50, 78, 50, 92, w, argb, true);
-    g.strokeLine(8, 50, 22, 50, w, argb, true);
-    g.strokeLine(78, 50, 92, 50, w, argb, true);
-    g.fillCircle(50, 50, 7f, argb);
-    if (kind == 'L') {
-      g.strokeLine(17, 17, 83, 83, 14f, DARK, true);
-      g.strokeLine(17, 17, 83, 83, w, argb, true);
-    }
-    g.restore();
+    g.text(t, 0, 0.35f * fs, fs, INK);
   }
 
   /* ---------- małe kółko z prędkością ---------- */
 
-  void drawBadge(Gfx g, UiState s) {
+  void drawBadge(Gfx g, Frame f) {
+    UiState s = f.state;
     boolean vis = s.view == UiState.View.DRIVE || s.view == UiState.View.WEAK || s.view == UiState.View.FREE;
     if (!vis || s.speed < 0) return;
-    float cx = 104f, cy = -104f, r = 44f;
-    int col = s.hasBand() ? AMBER : WHITE;
-    g.halo(cx, cy + 6f, r, 14f, argb(0.55f, 0, 0, 0));
-    g.fillCircle(cx, cy, r, DARK);
-    g.strokeCircle(cx, cy, r - 2f, 4f, col);
+    softShadow(g, BADGE_CX, BADGE_CY + 6f, BADGE_R, 14f, argb(0.55f, 0, 0, 0));
+    g.fillCircle(BADGE_CX, BADGE_CY, BADGE_R, WHITE);
+    g.fillCircle(BADGE_CX, BADGE_CY, BADGE_R - BADGE_BORDER, f.badgeBg);
     String t = Integer.toString(Math.min(999, s.speed));
-    float fs = t.length() >= 3 ? 36f : 44f;
-    g.text(t, cx, cy + 0.35f * fs, fs, col);
+    float fs = t.length() >= 3 ? 48f : 58f;
+    g.text(t, BADGE_CX, BADGE_CY + 0.35f * fs, fs, f.badgeFg);
   }
 
   /* ---------- opaska z mandatem ---------- */
@@ -227,7 +166,7 @@ public final class Painter {
   public static Ribbon layoutRibbon(Gfx m, int fine, int points) {
     Ribbon r = new Ribbon();
     r.amt = Penalties.formatPln(fine);
-    r.pts = points + " pkt";
+    r.pts = points + " pkt";
     float maxR = R - 11f;
     float fs = 66f;
     while (true) {
@@ -246,41 +185,18 @@ public final class Painter {
     }
   }
 
-  void drawRibbon(Gfx g, UiState s, long ageMs) {
+  void drawRibbon(Gfx g, UiState s) {
     if (!s.hasBand()) return;
     Ribbon r = layoutRibbon(g, s.fine, s.points);
-    float a = 1f, dy = 0f, sc = 1f;
-    if (ageMs < 220) {
-      float t = ageMs / 220f, e = 1f - (1f - t) * (1f - t);
-      a = e; dy = -10f * (1f - e); sc = 0.92f + 0.08f * e;
-    }
-    g.save();
-    g.translate(0, RIBBON_TOP + (r.bottom - RIBBON_TOP) / 2f + dy);
-    g.scale(sc);
-    g.translate(0, -(RIBBON_TOP + (r.bottom - RIBBON_TOP) / 2f));
-    g.beginGroup(a, false);
     // cień (kilka warstw zamiast rozmycia)
     for (int i = 4; i >= 1; i--) {
-      g.fillRoundRect(r.left - i, r.top + 8 - i, r.right + i, r.bottom + 8 + i, RIBBON_RHO + i, argb(0.12f, 0, 0, 0));
+      g.fillRoundRect(r.left - i * 2, r.top + 8 - i * 2, r.right + i * 2, r.bottom + 8 + i * 2, RIBBON_RHO + i * 2, argb(0.12f, 0, 0, 0));
     }
     g.fillRoundRect(r.left, r.top, r.right, r.bottom, RIBBON_RHO, AMBER);
     g.strokeRoundRect(r.left + 1.5f, r.top + 1.5f, r.right - 1.5f, r.bottom - 1.5f, RIBBON_RHO - 1.5f, 3f, INK);
     float line1 = r.top + 3f + 8f;
     g.text(r.amt, 0, line1 + 0.84f * r.fs, r.fs, INK);
     g.text(r.pts, 0, line1 + r.fs + 3f + 0.84f * (r.fs * 0.7f), r.fs * 0.7f, INK);
-    g.endGroup();
-    g.restore();
-  }
-
-  /* ---------- dół: ikony stanu GPS albo podpis limitu szacowanego ---------- */
-
-  void drawBottom(Gfx g, UiState s) {
-    if (s.hasBand()) return;
-    if (s.view == UiState.View.WEAK) glyph(g, 'W', 0, 180f, 45f / 84f, argb(0.85f, 0xC9, 0xC9, 0xCF));
-    else if (s.view == UiState.View.TUNNEL) glyph(g, 'L', 0, 180f, 45f / 84f, argb(0.85f, 0xC9, 0xC9, 0xCF));
-    else if (s.view == UiState.View.DRIVE && s.estimated) {
-      g.text("Limit szacowany", 0, 180f + 0.35f * 30f, 30f, argb(0.94f, 255, 255, 255));
-    }
   }
 
   /* ---------- narzędzia ---------- */
@@ -288,6 +204,12 @@ public final class Painter {
   public static int argb(float a, int r, int gr, int b) {
     int ai = Math.max(0, Math.min(255, Math.round(a * 255f)));
     return (ai << 24) | (r << 16) | (gr << 8) | b;
+  }
+
+  /** Ten sam kolor z krytym pomnożonym przez f (0..1). */
+  static int scaleAlpha(int argb, float f) {
+    int a = Math.round(((argb >>> 24) & 255) * Math.max(0f, Math.min(1f, f)));
+    return (a << 24) | (argb & 0x00FFFFFF);
   }
 
   static int mix(int c0, int c1, float t) {
@@ -300,12 +222,4 @@ public final class Painter {
   }
 
   static float clamp01(float v) { return Float.isNaN(v) ? 0f : Math.max(0f, Math.min(1f, v)); }
-
-  /** Przybliżenie krzywej cubic-bezier(.2,.9,.25,1.15) z lekkim przeregulowaniem. */
-  static float easeOutBack(float t) {
-    t = clamp01(t);
-    float c1 = 1.0f, c3 = c1 + 1f;
-    float p = t - 1f;
-    return 1f + c3 * p * p * p + c1 * p * p;
-  }
 }

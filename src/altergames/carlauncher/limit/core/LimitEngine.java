@@ -35,8 +35,11 @@ public final class LimitEngine {
   private boolean inFlight;
   private long nextAllowedAt;
   private int failures;
-  private long prevRoadId = -1;
+  private final RoadTracker tracker = new RoadTracker();
+  private TomTomLimits tomTom;
+  private TomTomLimits.Mode sourceMode = TomTomLimits.Mode.TOMTOM_FIRST;
   private Fix lastFix;
+  private Road lastRoad;
   private long lastSaveAt;
   private int okQueries, failedQueries;
   private String lastError = "";
@@ -49,6 +52,12 @@ public final class LimitEngine {
   }
 
   public LimitModel model() { return model; }
+
+  /** Warstwa limitów z TomTom (może być null) i tryb wyboru źródła; wołać przy starcie i po zmianie ustawień. */
+  public synchronized void setTomTom(TomTomLimits t, TomTomLimits.Mode mode) {
+    this.tomTom = t;
+    this.sourceMode = mode == null ? TomTomLimits.Mode.TOMTOM_FIRST : mode;
+  }
 
   /** Nowa próbka GPS (z dowolnego wątku). Nie zgłasza wyjątków. */
   public synchronized void onFix(Fix f) {
@@ -74,15 +83,22 @@ public final class LimitEngine {
     }
   }
 
+  /** Droga dopasowana do ostatniej pozycji albo null. */
+  public synchronized Road matchedRoad() { return lastRoad; }
+
+  /** Limit pokazywany na znaku albo -1. */
+  public synchronized int shownLimit() { return model.shownLimit(); }
+
   public synchronized void reset() {
+    lastRoad = null;
     model.reset();
     lastFix = null;
-    prevRoadId = -1;
+    tracker.reset();
   }
 
   public synchronized String diagnostics() {
     return "zapytania ok=" + okQueries + " błędy=" + failedQueries + " okno=" + (windowValid ? window.size() + " dróg" : "brak")
-        + " pamięć=" + cache.size() + " ostatni błąd=" + lastError;
+        + " pamięć=" + cache.size() + " ostatni błąd=" + lastError + (tomTom != null ? " | " + tomTom.diagnostics() : "");
   }
 
   /* ---------- wewnętrzne ---------- */
@@ -92,14 +108,22 @@ public final class LimitEngine {
     if (f == null) return;
     List<Road> roads = roadsFor(f);
     double bearing = !Double.isNaN(f.speedKmh) && f.speedKmh >= 4 ? f.bearingDeg : Double.NaN;   // kierunek wiarygodny tylko w ruchu
-    RoadMatcher.Match m = RoadMatcher.match(roads, f.lat, f.lon, bearing, f.accuracyM, prevRoadId);
+    RoadMatcher.Match m = tracker.update(roads, f.lat, f.lon, bearing, f.accuracyM, f.speedKmh, f.timeMs);
+    lastRoad = m == null ? null : m.road;
     if (m == null) {
-      prevRoadId = -1;
-      model.onCandidate(-1, Road.Source.NONE);
-    } else {
-      prevRoadId = m.road.id;
-      model.onCandidate(m.limit, m.source);
+      model.onCandidate(-1, Road.Source.NONE, false);
+      if (tomTom != null && sourceMode != TomTomLimits.Mode.OSM_ONLY) tomTom.onPosition(0, f);
+      return;
     }
+    int limit = m.limit;
+    Road.Source kind = m.source;
+    boolean live = false;
+    if (tomTom != null && sourceMode != TomTomLimits.Mode.OSM_ONLY) {
+      tomTom.onPosition(m.road.id, f);
+      TomTomLimits.Chosen c = TomTomLimits.combine(sourceMode, m.limit, m.source, tomTom.limitFor(m.road.id));
+      limit = c.limit; kind = c.source; live = c.live;
+    }
+    model.onCandidate(limit, kind, true, live);
   }
 
   private List<Road> roadsFor(Fix f) {

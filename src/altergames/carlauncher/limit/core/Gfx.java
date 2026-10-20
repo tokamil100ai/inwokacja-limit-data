@@ -11,20 +11,19 @@ public interface Gfx {
   void translate(float dx, float dy);
   void scale(float s);
 
-  /** Grupa rysowana razem, ze wspólną przezroczystością i opcjonalnym filtrem czarno-białym. */
-  void beginGroup(float alpha, boolean grayscale);
+  /** Grupa rysowana razem, ze wspólną przezroczystością i odbarwieniem gray (0 = kolory, 1 = czarno-biało). */
+  void beginGroup(float alpha, float gray);
   void endGroup();
 
   void fillCircle(float cx, float cy, float r, int argb);
-  /** Koło wypełnione gradientem promienistym o środku (gx, gy) i promieniu gr (od inner do outer). */
-  void fillCircleRadial(float cx, float cy, float r, float gx, float gy, float gr, int innerArgb, int outerArgb);
-  /** Miękka poświata na zewnątrz okręgu o promieniu r, szeroka na spread, malejąca do przezroczystości. */
-  void halo(float cx, float cy, float r, float spread, int argb);
-  /** Cień wewnętrzny: od przezroczystości na promieniu r*innerFrac do podanego koloru na promieniu r. */
-  void innerShade(float cx, float cy, float r, float innerFrac, int argb);
+  /** Koło o promieniu r wypełnione gradientem promienistym od środka (pos 0) do brzegu (pos 1); pos rosnące, tyle samo kolorów. */
+  void fillCircleStops(float cx, float cy, float r, float[] pos, int[] argb);
   void strokeCircle(float cx, float cy, float r, float width, int argb);
-  void strokeArc(float cx, float cy, float r, float startDeg, float sweepDeg, float width, int argb, boolean round);
-  void strokeLine(float x1, float y1, float x2, float y2, float width, int argb, boolean round);
+  /**
+   * Obwódka koła złożona z równych kresek: [dashes] kresek na obwodzie, kreska zajmuje [onFraction] okresu, a jedna kreska jest wyśrodkowana
+   * na godzinie 3 (przy [dashes] podzielnym przez 4 kreski są też na 6, 9 i 12).
+   */
+  void strokeDashedCircle(float cx, float cy, float r, float width, int dashes, float onFraction, int argb);
   void fillRoundRect(float l, float t, float r, float b, float rx, int argb);
   void strokeRoundRect(float l, float t, float r, float b, float rx, float width, int argb);
   /** Tekst pogrubiony, wyśrodkowany poziomo względem cx, linia bazowa na baseline. */

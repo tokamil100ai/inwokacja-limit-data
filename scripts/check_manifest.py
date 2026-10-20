@@ -11,11 +11,14 @@ with open(new_path, encoding="utf-8") as f:
     new = json.load(f)
 packs = new["packs"]
 total = sum(p[2] for p in packs)
-print(f"nowy manifest: {len(packs)} paczek, {total / 1e6:.1f} MB, czas danych OSM {new['osm']}")
+cams = new.get("cams", 0)
+print(f"nowy manifest: {len(packs)} paczek, {total / 1e6:.1f} MB, radarów {cams}, czas danych OSM {new['osm']}")
 
 errors = []
-if new.get("v") != 1:
+if new.get("v") != 2:
     errors.append("zła wersja manifestu")
+if cams < 500:
+    errors.append(f"za mało radarów ({cams}): wykaz ITD albo dane OSM wyglądają na niepełne")
 if len(packs) < 2000:
     errors.append(f"za mało paczek ({len(packs)}), Polska ma ich kilka tysięcy")
 if total > 900e6:
@@ -36,6 +39,9 @@ if old_path and os.path.isfile(old_path) and os.path.getsize(old_path) > 0:
             errors.append("liczba paczek spadła o ponad 10 procent")
         if total < 0.85 * old_total:
             errors.append("rozmiar danych spadł o ponad 15 procent")
+        old_cams = old.get("cams", 0)
+        if old_cams and cams < 0.85 * old_cams:
+            errors.append(f"liczba radarów spadła o ponad 15 procent ({old_cams} -> {cams})")
         same = {(p[0], p[1]): p[3] for p in old["packs"]}
         changed = sum(1 for p in packs if same.get((p[0], p[1])) != p[3])
         print(f"zmienionych lub nowych paczek: {changed} z {len(packs)}")

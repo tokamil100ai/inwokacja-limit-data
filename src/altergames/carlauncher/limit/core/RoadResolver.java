@@ -4,9 +4,14 @@ import java.util.Map;
 
 /**
  * Zamiana tagów OpenStreetMap jednej drogi na Road z limitem.
- * Zasada ostrożności: szacujemy tylko tam, gdzie reguła jest jednoznaczna (autostrada, droga ekspresowa, strefa
- * zamieszkania, ulica osiedlowa). Drogi, na których limit zależy od tego, czy jest teren zabudowany, zostają
- * bez limitu, żeby nie pokazywać błędnych ostrzeżeń.
+ * Limit zapisany w OSM (maxspeed, maxspeed:forward/backward, zone:maxspeed) jest znakiem (Source.SIGN). Gdy go nie ma, w danych
+ * zostaje SZACUNEK (Source.ESTIMATE), zawsze oznaczony: w aplikacji przerywany pierścień, a przełącznik w ustawieniach widżetu
+ * (od 2026-10-20, decyzja Kamila) pozwala w ogóle nie pokazywać szacunków (wtedy droga bez zapisanego limitu ma znak "?").
+ * Szacunki to: deklaracja mapującego (maxspeed:type / source:maxspeed = PL:urban, PL:rural...) oraz kilka reguł z prawa, które nie
+ * zależą od terenu zabudowanego: autostrada 140, droga ekspresowa 120 (dwujezdniowa) lub 100, strefa zamieszkania 20 i ulica osiedlowa 50.
+ * Drogi krajowe, wojewódzkie, powiatowe i gminne bez zapisu zostają bez limitu, bo 50 czy 90 zależy od terenu zabudowanego (patrz
+ * LimitInference i UrbanInference: oba są prognozami). Droga bez limitu zostaje w bazie ("?"), żeby dopasowanie nie przeskakiwało
+ * na sąsiednią drogę główną z innym limitem.
  */
 public final class RoadResolver {
   private RoadResolver() {}

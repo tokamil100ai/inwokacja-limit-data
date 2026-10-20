@@ -18,6 +18,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: write      # tylko do podtrzymania harmonogramu (ostatni krok)
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +36,9 @@ jobs:
           echo "$(cut -d' ' -f1 poland.osm.pbf.md5)  poland.osm.pbf" | md5sum -c -
           ls -l poland.osm.pbf
 
+      - name: Wykaz urządzeń rejestrujących ITD (fotoradary, odcinkowy pomiar)
+        run: python3 scripts/fetch_itd.py itd.csv
+
       - name: Kompilacja programu budującego
         run: |
           mkdir -p build
@@ -40,24 +46,40 @@ jobs:
 
       - name: Budowa paczek
         run: |
-          mkdir -p site/v1
-          java -Xmx12g -cp build altergames.carlauncher.limit.tools.RdbBuilder poland.osm.pbf site/v1 2000
+          mkdir -p site/v2
+          java -Xmx6g -cp build altergames.carlauncher.limit.tools.RdbBuilder --itd=itd.csv poland.osm.pbf site/v2 2000
 
       - name: Poprzednio opublikowany manifest
-        run: curl -fsSL -o previous-manifest.json "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/v1/manifest.json" || echo "brak poprzedniego manifestu"
+        run: curl -fsSL -o previous-manifest.json "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/v2/manifest.json" || echo "brak poprzedniego manifestu"
 
       - name: Kontrola sensowności wyniku
-        run: python3 scripts/check_manifest.py site/v1/manifest.json previous-manifest.json
+        run: python3 scripts/check_manifest.py site/v2/manifest.json previous-manifest.json
+
+      - name: Podpis spisu paczek (klucz prywatny tylko w sekrecie LIMIT_SIGNING_KEY)
+        env:
+          LIMIT_SIGNING_KEY: ${{ secrets.LIMIT_SIGNING_KEY }}
+        run: |
+          test -n "$LIMIT_SIGNING_KEY" || { echo "brak sekretu LIMIT_SIGNING_KEY"; exit 1; }
+          umask 077
+          printf '%s' "$LIMIT_SIGNING_KEY" > "$RUNNER_TEMP/limit-signing.hex"
+          java -cp build altergames.carlauncher.limit.tools.ManifestSigner sign "$RUNNER_TEMP/limit-signing.hex" site/v2/manifest.json site/v2/manifest.sig
+          rm -f "$RUNNER_TEMP/limit-signing.hex"
+          java -cp build altergames.carlauncher.limit.tools.ManifestSigner verify limit-public-key.hex site/v2/manifest.json site/v2/manifest.sig
 
       - name: Tabela mandatów i strona informacyjna
         run: |
-          cp penalties.json site/v1/penalties.json
+          cp penalties.json site/v2/penalties.json
           cp site-index.html site/index.html
           touch site/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+      - name: Podtrzymanie harmonogramu (GitHub wyłącza zaplanowane zadania po 60 dniach bez aktywności w repozytorium)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/enable" || echo "nie udało się podtrzymać harmonogramu (nie przerywa budowy)"
 
   deploy:
     needs: build
