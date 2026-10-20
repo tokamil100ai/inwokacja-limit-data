@@ -15,6 +15,7 @@ import java.util.Locale;
  */
 public final class OverpassClient implements RoadSource {
   public static final String[] DEFAULT_ENDPOINTS = {
+      "https://overpass.openstreetmap.fr/api/interpreter",
       "https://overpass-api.de/api/interpreter",
       "https://overpass.private.coffee/api/interpreter",
       "https://overpass.kumi.systems/api/interpreter",
@@ -39,7 +40,7 @@ public final class OverpassClient implements RoadSource {
   }
 
   public static OverpassClient createDefault() {
-    return new OverpassClient(DEFAULT_ENDPOINTS, 4000, 9000, 14000, "AgamaCarLauncher-LimitWidget/1.0 (osobisty)");
+    return new OverpassClient(DEFAULT_ENDPOINTS, 4000, 9000, 14000, "InwokacjaLauncher-LimitWidget/1.0 (osobisty)");
   }
 
   /** Zapytanie Overpass QL. Współrzędne zawsze z kropką dziesiętną, niezależnie od języka telefonu. */

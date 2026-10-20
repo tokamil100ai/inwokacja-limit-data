@@ -23,7 +23,7 @@ public final class LimitModel {
   public static final long GPS_LOST_MS = 4000;
   /** Dokładność gorsza niż tyle metrów oznacza słaby GPS. */
   public static final double WEAK_ACCURACY_M = 35;
-  /** Poniżej tej prędkości pokazujemy 0 (jak w oryginalnej AGAMA): drgania GPS na postoju nie mają skakać po cyfrach. */
+  /** Poniżej tej prędkości pokazujemy 0 (jak w oryginalnej aplikacji): drgania GPS na postoju nie mają skakać po cyfrach. */
   public static final int MIN_SHOWN_KMH = 5;
   /** Duże przekroczenie (czerwona poświata pod znakiem): włącza się od tylu km/h ponad limit, gaśnie poniżej drugiej wartości (histereza). */
   public static final int SEVERE_ON_KMH = 30, SEVERE_OFF_KMH = 27;
@@ -192,7 +192,7 @@ public final class LimitModel {
 
   /**
    * Prędkość pokazywana kierowcy: poniżej {@link #MIN_SHOWN_KMH} zero, od niej zwykłe zaokrąglenie do pełnych km/h (jak w Velociraptorze;
-   * oryginalna AGAMA obcina ułamki). Tę samą liczbę widać w kółku i ona liczy się do koloru kółka, opaski z mandatem i czerwonej poświaty.
+   * oryginalna aplikacja obcina ułamki). Tę samą liczbę widać w kółku i ona liczy się do koloru kółka, opaski z mandatem i czerwonej poświaty.
    */
   public static int displaySpeed(double kmh) {
     if (Double.isNaN(kmh) || kmh < MIN_SHOWN_KMH) return 0;

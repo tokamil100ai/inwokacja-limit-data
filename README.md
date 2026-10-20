@@ -5,7 +5,7 @@ wyciąga z nich drogi z limitami prędkości i fotoradary (punktowe, odcinkowy p
 łączy oba źródła radarów w jedną listę, tnie wszystko na małe paczki (około 11 x 10 km) i publikuje przez GitHub Pages:
 
 - `v2/manifest.json` – spis paczek z rozmiarami i sumami kontrolnymi, czasem danych i liczbą radarów,
-- `v2/p_X_Y.rdb` – paczki dróg i radarów (format v2; poprzedni format v1 w katalogu `v1/` nie jest już aktualizowany),
+- `v2/p_X_Y.rdb` – paczki dróg i radarów (format v2; dawny format v1 został wycofany (katalog `v1/` nie jest już publikowany)),
 - `v2/manifest.sig` – podpis cyfrowy spisu (ECDSA P-256, szesnastkowo). Aplikacja przyjmuje tylko spis podpisany kluczem, którego część
   publiczna jest w `limit-public-key.hex` i w aplikacji; klucz prywatny jest wyłącznie w sekrecie `LIMIT_SIGNING_KEY` repozytorium
   i w kopii zapasowej właściciela (nie w tym repozytorium). Każdy wpis spisu ma też SHA-256 paczki, więc podmiana plików na hostingu

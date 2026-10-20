@@ -203,7 +203,7 @@ public final class OnlineCameras {
       this.connectMs = connectMs; this.readMs = readMs; this.userAgent = userAgent;
     }
 
-    public static OverpassFetcher createDefault() { return new OverpassFetcher(null, 5000, 14000, "AgamaCarLauncher-LimitWidget/1.0 (osobisty)"); }
+    public static OverpassFetcher createDefault() { return new OverpassFetcher(null, 5000, 14000, "InwokacjaLauncher-LimitWidget/1.0 (osobisty)"); }
 
     @Override public List<Camera> fetch(double lat, double lon, int radiusM) throws RoadSource.FetchException {
       if (Double.isNaN(lat) || Double.isNaN(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) throw new RoadSource.FetchException("zła pozycja");

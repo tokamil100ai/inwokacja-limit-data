@@ -23,7 +23,7 @@ def get(url, accept=None):
     last = None
     for attempt in range(4):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "agama-limit-data/1", **({"Accept": accept} if accept else {})})
+            req = urllib.request.Request(url, headers={"User-Agent": "inwokacja-limit-data/1", **({"Accept": accept} if accept else {})})
             with urllib.request.urlopen(req, timeout=60) as r:
                 return r.read()
         except Exception as e:  # noqa: BLE001 - sieć bywa kapryśna, próbujemy kilka razy

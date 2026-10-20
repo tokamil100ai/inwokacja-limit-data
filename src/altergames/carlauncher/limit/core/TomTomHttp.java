@@ -21,7 +21,7 @@ public final class TomTomHttp implements TomTomLimits.Client {
   private final String key, base, userAgent;
   private final int connectMs, readMs;
 
-  public TomTomHttp(String key) { this(key, BASE_URL, 5000, 8000, "AgamaLimit/1"); }
+  public TomTomHttp(String key) { this(key, BASE_URL, 5000, 8000, "InwokacjaLimit/1"); }
 
   public TomTomHttp(String key, String baseUrl, int connectMs, int readMs, String userAgent) {
     this.key = key == null ? "" : key.trim();

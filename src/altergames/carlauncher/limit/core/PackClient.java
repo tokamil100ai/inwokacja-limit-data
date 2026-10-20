@@ -32,7 +32,7 @@ public final class PackClient {
     this.connectMs = connectMs; this.readMs = readMs; this.totalMs = totalMs; this.userAgent = userAgent;
   }
 
-  public static PackClient createDefault() { return new PackClient(7000, 12000, 90_000L, "AgamaLimit/1"); }
+  public static PackClient createDefault() { return new PackClient(7000, 12000, 90_000L, "InwokacjaLimit/1"); }
 
   /** Pobiera url do dest (nadpisując). expectedSize < 0: rozmiar nieznany. Przy porażce usuwa dest. */
   public Result download(String url, File dest, long maxBytes, long expectedSize) throws RoadSource.FetchException {

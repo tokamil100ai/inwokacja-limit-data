@@ -1,7 +1,7 @@
 package altergames.carlauncher.limit.core;
 
 /**
- * Rysowanie kółka. Odpowiednik prototypu webowego (agama-view-web: src/widget_limit.js), w jednostkach logicznych:
+ * Rysowanie kółka. Odpowiednik prototypu webowego (src/widget_limit.js), w jednostkach logicznych:
  * pole widżetu to 477, początek współrzędnych w jego środku. Znak leży bezpośrednio na tle ekranu głównego (bez własnej tarczy),
  * a pod nim, przy dużym przekroczeniu, jest miękka czerwona poświata.
  * Stan SEARCH (jeszcze nie ma GPS) rysuje wołający: to zwykłe logo auta, Painter nie rysuje wtedy nic.
