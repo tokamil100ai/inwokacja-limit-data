@@ -28,12 +28,8 @@ public final class LimitModel {
   /** Duże przekroczenie (czerwona poświata pod znakiem): włącza się od tylu km/h ponad limit, gaśnie poniżej drugiej wartości (histereza). */
   public static final int SEVERE_ON_KMH = 30, SEVERE_OFF_KMH = 27;
 
-  private int tol = 3;
-  private boolean showFine = true;
-  /** Czy pokazywać limity szacowane (Source.ESTIMATE): wyłączone dają na takiej drodze znak "?", jak na drodze bez limitu. */
-  private boolean useEstimates = true;
-  /** Czy przy limicie szacowanym pokazywać też mandat z punktami i czerwoną poświatę (ostrzeżenia): wyłączone zostawiają tylko znak. */
-  private boolean alarmsForEstimates = true;
+  /** Ustawienia logiki (tolerancja, szacunki, progi czasowe, poświata); wartości domyślne to stałe powyżej. */
+  private LimitConfig cfg = new LimitConfig();
   /** Czy dane drogowe są "na żywo": jest internet i paczki były niedawno sprawdzone na serwerze. Bez tego znak ma pomarańczowy pierścień (chyba że limit przyszedł z TomTom). */
   private boolean dataLive = true;
   private boolean severe;
@@ -63,9 +59,16 @@ public final class LimitModel {
   private long goodAt = Long.MIN_VALUE / 2;
 
   public synchronized void configure(int tol, boolean showFine) {
-    this.tol = Math.max(0, Math.min(10, tol));
-    this.showFine = showFine;
+    LimitConfig c = cfg.copy();
+    c.tol = tol; c.showFine = showFine;
+    cfg = c.clamped();
   }
+
+  /** Wszystkie ustawienia naraz (z ustawień aplikacji); model robi własną, obciętą do zakresów kopię. */
+  public synchronized void configure(LimitConfig c) { if (c != null) cfg = c.clamped(); }
+
+  /** Kopia bieżących ustawień (do testów i diagnostyki). */
+  public synchronized LimitConfig config() { return cfg.copy(); }
 
   /** Jak wyżej, z przełącznikiem limitów szacowanych (ustawienie widżetu: pokazywać przerywany pierścień czy wolimy "?"). */
   public synchronized void configure(int tol, boolean showFine, boolean useEstimates) {
@@ -74,9 +77,9 @@ public final class LimitModel {
 
   /** Jak wyżej, z osobnym przełącznikiem ostrzeżeń (mandat, czerwona poświata) przy limitach szacowanych. */
   public synchronized void configure(int tol, boolean showFine, boolean useEstimates, boolean alarmsForEstimates) {
-    configure(tol, showFine);
-    this.useEstimates = useEstimates;
-    this.alarmsForEstimates = alarmsForEstimates;
+    LimitConfig c = cfg.copy();
+    c.tol = tol; c.showFine = showFine; c.useEstimates = useEstimates; c.alarmsForEstimates = alarmsForEstimates;
+    cfg = c.clamped();
   }
 
   public synchronized void setPenalties(Penalties p) { if (p != null) this.penalties = p; }
@@ -103,7 +106,7 @@ public final class LimitModel {
     haveFix = true;
     lastFixAt = now;
     accuracy = f.accuracyM;
-    boolean weakNow = !Double.isNaN(accuracy) && accuracy > WEAK_ACCURACY_M;
+    boolean weakNow = !Double.isNaN(accuracy) && accuracy > cfg.weakAccuracyM;
     if (!weakNow) weakSince = 0; else if (weakSince == 0) weakSince = now;
     double v = f.speedKmh;
     boolean ok = !Double.isNaN(v) && !Double.isInfinite(v) && v >= 0 && v <= 350;
@@ -130,7 +133,7 @@ public final class LimitModel {
   public synchronized void onCandidate(int limit, Road.Source kind, boolean onRoad, boolean live) {
     candOnRoad = onRoad;
     candLive = live;
-    if (!useEstimates && kind == Road.Source.ESTIMATE) { limit = -1; kind = Road.Source.NONE; }   // szacunek wyłączony: droga bez limitu
+    if (!cfg.useEstimates && kind == Road.Source.ESTIMATE) { limit = -1; kind = Road.Source.NONE; }   // szacunek wyłączony: droga bez limitu
     if (!Maxspeed.validLimit(limit) || kind == null || kind == Road.Source.NONE) { candLimit = -1; candKind = Road.Source.NONE; }   // tylko poprawne limity 5..140
     else { candLimit = limit; candKind = kind; }
   }
@@ -142,8 +145,8 @@ public final class LimitModel {
     boolean estimated = false, offline = false;
 
     if (gpsNone) {
-      if (goodLimit >= 0 && ageOf(now, goodAt) < LAST_KNOWN_MS) {
-        view = UiState.View.TUNNEL; limit = goodLimit; estimated = goodKind == Road.Source.ESTIMATE; offline = !(goodLive || dataLive);
+      if (goodLimit >= 0 && ageOf(now, goodAt) < cfg.lastKnownMs) {
+        view = UiState.View.TUNNEL; limit = goodLimit; estimated = goodKind == Road.Source.ESTIMATE; offline = cfg.offlineMark && !(goodLive || dataLive);
       } else {
         view = UiState.View.SEARCH;
         shownLimit = -1; pendLimit = -1; goodLimit = -1;
@@ -153,18 +156,19 @@ public final class LimitModel {
         seenAt = now;
         if (shownLimit < 0) { shownLimit = candLimit; shownKind = candKind; shownLive = candLive; pendLimit = -1; }
         else if (shownLimit != candLimit) {
-          if (pendLimit != candLimit) { pendLimit = candLimit; pendKind = candKind; pendAt = now; }
-          else if (ageOf(now, pendAt) >= SHOW_DELAY_MS) {
+          if (cfg.showDelayMs <= 0) { shownLimit = candLimit; shownKind = candKind; shownLive = candLive; pendLimit = -1; }
+          else if (pendLimit != candLimit) { pendLimit = candLimit; pendKind = candKind; pendAt = now; }
+          else if (ageOf(now, pendAt) >= cfg.showDelayMs) {
             shownLimit = candLimit; shownKind = candKind; shownLive = candLive; pendLimit = -1;
           }
         } else { pendLimit = -1; shownKind = candKind; shownLive = candLive; }
-      } else if (!(shownLimit >= 0 && ageOf(now, seenAt) < (candOnRoad ? NO_LIMIT_ROAD_KEEP_MS : KEEP_MS))) {
+      } else if (!(shownLimit >= 0 && ageOf(now, seenAt) < (candOnRoad ? Math.min(cfg.keepMs, cfg.showDelayMs) : cfg.keepMs))) {
         shownLimit = -1; pendLimit = -1;
       }
       if (shownLimit >= 0) {
-        limit = shownLimit; estimated = shownKind == Road.Source.ESTIMATE; offline = !(shownLive || dataLive);
+        limit = shownLimit; estimated = shownKind == Road.Source.ESTIMATE; offline = cfg.offlineMark && !(shownLive || dataLive);
         goodLimit = shownLimit; goodKind = shownKind; goodLive = shownLive; goodAt = now;
-        boolean weak = weakSince != 0 && ageOf(now, weakSince) >= GRAY_HOLD_MS;      // dopiero po GRAY_HOLD_MS słabego GPS
+        boolean weak = weakSince != 0 && ageOf(now, weakSince) >= cfg.grayHoldMs;      // dopiero po czasie szarości (domyślnie GRAY_HOLD_MS) słabego GPS
         view = weak ? UiState.View.WEAK : UiState.View.DRIVE;
       } else {
         view = UiState.View.FREE;
@@ -172,30 +176,33 @@ public final class LimitModel {
     }
 
     boolean showSpeed = view == UiState.View.DRIVE || view == UiState.View.WEAK || view == UiState.View.FREE;
-    int spd = showSpeed ? displaySpeed(speed) : -1;
+    int spd = showSpeed ? displaySpeed(speed, cfg.minShownKmh) : -1;
     int fine = 0, points = 0;
     boolean active = view == UiState.View.DRIVE;
-    int excess = active && speedKnown ? displaySpeed(speed) - limit : 0;
-    boolean muted = estimated && !alarmsForEstimates;                   // limit szacowany bez ostrzeżeń: tylko znak
-    if (active && excess >= SEVERE_ON_KMH && !muted) severe = true;
-    else if (!active || muted || excess < SEVERE_OFF_KMH) severe = false;
+    int excess = active && speedKnown ? displaySpeed(speed, cfg.minShownKmh) - limit : 0;
+    boolean muted = estimated && !cfg.alarmsForEstimates;                   // limit szacowany bez ostrzeżeń: tylko znak
+    if (active && cfg.glow && excess >= cfg.glowOnKmh && !muted) severe = true;
+    else if (!active || muted || !cfg.glow || excess < cfg.glowOffKmh()) severe = false;
     if (active && speedKnown && !muted) {
-      int eff = excess - tol;
-      if (showFine && eff > 0) {
+      int eff = excess - cfg.tol;
+      if (cfg.showFine && eff > 0) {
         Penalties.Band b = penalties.find(eff);
         if (b != null) { fine = b.fine; points = b.points; }
       }
     }
-    boolean stale = view == UiState.View.WEAK || (view == UiState.View.TUNNEL && ageOf(now, lastFixAt) >= GRAY_HOLD_MS);
-    return new UiState(view, limit, estimated, spd, severe, fine, points, stale, offline);
+    boolean stale = view == UiState.View.WEAK || (view == UiState.View.TUNNEL && ageOf(now, lastFixAt) >= cfg.grayHoldMs);
+    return new UiState(view, limit, estimated, spd, severe, fine, points, stale, offline, muted && active);
   }
 
   /**
    * Prędkość pokazywana kierowcy: poniżej {@link #MIN_SHOWN_KMH} zero, od niej zwykłe zaokrąglenie do pełnych km/h (jak w Velociraptorze;
    * oryginalna aplikacja obcina ułamki). Tę samą liczbę widać w kółku i ona liczy się do koloru kółka, opaski z mandatem i czerwonej poświaty.
    */
-  public static int displaySpeed(double kmh) {
-    if (Double.isNaN(kmh) || kmh < MIN_SHOWN_KMH) return 0;
+  public static int displaySpeed(double kmh) { return displaySpeed(kmh, MIN_SHOWN_KMH); }
+
+  /** To samo z progiem z ustawień ([LimitConfig#minShownKmh]). */
+  public static int displaySpeed(double kmh, int minShown) {
+    if (Double.isNaN(kmh) || kmh < minShown) return 0;
     return (int) Math.round(kmh);
   }
 

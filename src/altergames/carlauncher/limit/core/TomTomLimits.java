@@ -98,7 +98,8 @@ public final class TomTomLimits {
   }
 
   /** Do testów: niższy dzienny limit zapytań. */
-  synchronized void setDailyLimit(int n) { dailyLimit = n; }
+  /** Dzienny limit zapytań (ustawienie w aplikacji; 100 do 2000). */
+  public synchronized void setDailyLimit(int n) { dailyLimit = Math.max(1, n); }
 
   /**
    * Pozycja z numerem dopasowanej drogi (0 = brak drogi). Zapamiętuje punkty śladu i, gdy trzeba, zleca zapytanie w tle.

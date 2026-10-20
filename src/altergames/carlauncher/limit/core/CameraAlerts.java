@@ -60,6 +60,9 @@ public final class CameraAlerts {
   private String lastError = "";
   private int updates, listRefreshes;
   private int leadSec = LEAD_DEFAULT_S;
+  /** Filtr z ustawień: rodzaje urządzeń, prędkość od której ostrzegamy i "tylko gdy jadę szybciej niż limit". */
+  private boolean kindSpeed = true, kindSection = true, kindRed = true, kindRail = true, onlyOver;
+  private double minSpeedKmh = MIN_SPEED_KMH;
 
   public CameraAlerts(LimitEngine.Clock clock, Source source) { this.clock = clock; this.source = source; }
 
@@ -68,8 +71,28 @@ public final class CameraAlerts {
 
   public synchronized int leadSeconds() { return leadSec; }
 
+  /**
+   * Filtr ostrzeżeń (ustawienia fotoradarów): które rodzaje urządzeń ostrzegają, od jakiej prędkości (km/h) i czy tylko przy jeździe szybciej niż limit
+   * (dotyczy fotoradarów i odcinkowego pomiaru; kamery na światłach i przejazdy kolejowe nie mają limitu, więc ten filtr ich nie dotyczy).
+   */
+  public synchronized void setFilter(boolean speed, boolean section, boolean red, boolean rail, double minSpeedKmh, boolean onlyOver) {
+    this.kindSpeed = speed; this.kindSection = section; this.kindRed = red; this.kindRail = rail;
+    this.minSpeedKmh = Math.max(0, Math.min(60, minSpeedKmh));
+    this.onlyOver = onlyOver;
+    current = null; prevCam = null; shownKey = "";
+  }
+
+  private boolean kindOn(Camera c) {
+    switch (c.kind) {
+      case Camera.SECTION_START: case Camera.SECTION_END: return kindSection;
+      case Camera.RED_LIGHT: return kindRed;
+      case Camera.RAIL_LIGHT: return kindRail;
+      default: return kindSpeed;
+    }
+  }
+
   /** Zasięg alertu w metrach dla prędkości v (m/s) i wyprzedzenia lead (s). */
-  static double rangeFor(double v, int lead) {
+  public static double rangeFor(double v, int lead) {
     return clamp(v * lead, RANGE_MIN_M, Math.min(RANGE_MAX_M, lead * RANGE_PER_LEAD_S));
   }
 
@@ -101,7 +124,7 @@ public final class CameraAlerts {
     try {
       updates++;
       long now = clock.mono();
-      boolean moving = f != null && f.valid() && !Double.isNaN(f.speedKmh) && f.speedKmh >= MIN_SPEED_KMH && !Double.isNaN(f.bearingDeg);
+      boolean moving = f != null && f.valid() && !Double.isNaN(f.speedKmh) && f.speedKmh >= minSpeedKmh && !Double.isNaN(f.bearingDeg);
       if (!moving) {
         if (current != null && now - lastUpdateAt > STOP_KEEP_MS) { current = null; prevCam = null; shownKey = ""; }
         return current;
@@ -117,6 +140,7 @@ public final class CameraAlerts {
       Camera best = null, endCam = null;
       double bestD = Double.MAX_VALUE, endD = Double.MAX_VALUE;
       for (Camera c : list) {
+        if (!kindOn(c)) continue;
         double d = distanceAhead(c, f, heading, road, cum, range * 1.2);
         if (Double.isNaN(d)) continue;
         String k = key(c);
@@ -151,6 +175,8 @@ public final class CameraAlerts {
       shownKey = k;
       if (k.equals(dismissedKey)) { current = null; return null; }
       int limit = cam.limit > 0 ? cam.limit : sectionStart != null && sectionStart.limit > 0 ? sectionStart.limit : roadLimit > 0 ? roadLimit : -1;
+      boolean speedKind = cam.kind == Camera.SPEED || cam.kind == Camera.SECTION_START || cam.kind == Camera.SECTION_END;
+      if (onlyOver && speedKind && limit > 0 && f.speedKmh <= limit) { current = null; return null; }     // jedziemy w limicie: bez ostrzeżenia (stan zbliżania zostaje)
       current = new Alert(cam, typeOf(cam), (int) Math.round(dist), zone, limit);
       return current;
     } catch (RuntimeException e) {

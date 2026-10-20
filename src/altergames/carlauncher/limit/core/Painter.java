@@ -11,6 +11,45 @@ public final class Painter {
   public static final float D = 477f;
   public static final float R = D / 2f;
 
+  /**
+   * Wygląd z ustawień (Ustawienia > Limit prędkości > Wygląd znaku i Kolory akcentów): kolory akcentów, rozmiary i opcje.
+   * Wartości domyślne dają dokładnie dotychczasowy wygląd. Pola zmienia aplikacja, zanim zbuduje klatkę; Painter ich nie zmienia.
+   */
+  public static final class Style {
+    /** Czerwony akcent (pierścień znaku, znak zapytania, poświata) i pomarańczowy (dane bez internetu). */
+    public int red = SIGN_RED, orange = SIGN_ORANGE;
+    /** Tło kółka z prędkością w limicie oraz ponad limitem (i opaski z mandatem). */
+    public int ok = GREEN, over = AMBER;
+    /** Skale: znak, kółko z prędkością, opaska z mandatem, poświata (poświata tylko do 1,0, bo nie wychodzi poza pole widżetu). */
+    public float signScale = 1f, badgeScale = 1f, fineScale = 1f, glowScale = 1f;
+    public boolean badge = true, badgeColors = true, dashEst = true, stale = true, showPts = true;
+    /** Brak danych o limicie: 0 znak ze znakiem zapytania, 1 logo auta, 2 nic (decyduje widok, Painter rysuje znak tylko dla 0). */
+    public int unknown = 0;
+
+    /** Kolor pierścienia dla stanu (pomarańczowy dla danych bez internetu). */
+    public int ring(boolean offline) { return offline ? orange : red; }
+
+    /** Gradient poświaty: dla domyślnych kolorów dokładnie dotychczasowe stałe, dla własnych te same współczynniki liczone od koloru akcentu. */
+    public int[] glow(boolean offline) {
+      int c = ring(offline);
+      if (c == SIGN_RED) return ALARM_COL;
+      if (c == SIGN_ORANGE) return ALARM_COL_ORANGE;
+      final float[] k = {0.97f, 0.90f, 0.75f, 0.57f, 0.33f}, a = {0.95f, 0.93f, 0.84f, 0.5f, 0f};
+      int[] out = new int[k.length];
+      for (int i = 0; i < k.length; i++) out[i] = argb(a[i], Math.round(((c >> 16) & 255) * k[i]), Math.round(((c >> 8) & 255) * k[i]), Math.round((c & 255) * k[i]));
+      return out;
+    }
+
+    /** Kolor cyfr na danym tle: ciemny na jasnym, biały na ciemnym. */
+    public static int textOn(int bg) {
+      double lum = 0.299 * ((bg >> 16) & 255) + 0.587 * ((bg >> 8) & 255) + 0.114 * (bg & 255);
+      return lum > 150 ? INK : WHITE;
+    }
+
+    /** Cyfry w kółku w limicie: tło to mieszanka ciemnego z kolorem "w limicie", więc oceniamy ściemniony kolor jak w prototypie. */
+    int okText() { return textOn(argb(1f, Math.round(((ok >> 16) & 255) * 0.7f), Math.round(((ok >> 8) & 255) * 0.7f), Math.round((ok & 255) * 0.7f))); }
+  }
+
   /** Wszystko, czego Painter potrzebuje do jednej klatki. Wartości płynne (poświata, odbarwienie, kolor kółka) liczy {@link FrameDriver}. */
   public static final class Frame {
     public UiState state = UiState.search();
@@ -22,16 +61,21 @@ public final class Painter {
     public float glow;
     /** Kolor tła i cyfr kółka z prędkością. */
     public int badgeBg = DARK, badgeFg = WHITE;
+    /** Wygląd z ustawień (kolory, rozmiary, opcje). */
+    public Style style = new Style();
 
     /** Klatka w stanie ustalonym (bez płynnych przejść): dla podglądu i testów. */
-    public static Frame steady(UiState s) {
+    public static Frame steady(UiState s) { return steady(s, new Style()); }
+
+    public static Frame steady(UiState s, Style st) {
       Frame f = new Frame();
       f.state = s;
+      f.style = st;
       f.alarm = alarmTarget(s);
-      f.gray = grayTarget(s);
+      f.gray = grayTarget(s, st);
       f.glow = glowTarget(s);
-      f.badgeBg = badgeBgTarget(s);
-      f.badgeFg = badgeFgTarget(s);
+      f.badgeBg = badgeBgTarget(s, st);
+      f.badgeFg = badgeFgTarget(s, st);
       return f;
     }
   }
@@ -64,37 +108,48 @@ public final class Painter {
 
   /* ---------- wartości docelowe (wspólne dla klatki ustalonej i płynnej) ---------- */
 
-  static boolean known(UiState s) { return s.view == UiState.View.DRIVE && s.limit >= 0; }
+  /** Limit pewny na tyle, żeby oceniać kolor kółka: jazda z limitem i bez wyciszonych ostrzeżeń (szacunek z wyłączonymi ostrzeżeniami). */
+  static boolean known(UiState s) { return s.view == UiState.View.DRIVE && s.limit >= 0 && !s.muted; }
 
   static float alarmTarget(UiState s) { return s.severe ? 1f : 0f; }
-  static float grayTarget(UiState s) { return s.stale ? 1f : 0f; }
+  static float grayTarget(UiState s) { return grayTarget(s, new Style()); }
+  static float grayTarget(UiState s, Style st) { return s.stale && st.stale ? 1f : 0f; }
   static float glowTarget(UiState s) { return s.hasBand() ? 1f : 0f; }
 
   /** Zielone tło w limicie (od 0 do 10 km/h stopniowo z ciemnego), bursztynowe ponad limitem, ciemne gdy limit niepewny. */
-  static int badgeBgTarget(UiState s) {
-    if (!known(s) || s.speed < 0) return DARK;
-    if (s.speed > s.limit) return AMBER;
-    return mix(DARK, GREEN, Math.min(1f, s.speed / 10f));
+  static int badgeBgTarget(UiState s) { return badgeBgTarget(s, new Style()); }
+  static int badgeBgTarget(UiState s, Style st) {
+    if (!st.badgeColors || !known(s) || s.speed < 0) return DARK;
+    if (s.speed > s.limit) return st.over;
+    return mix(DARK, st.ok, Math.min(1f, s.speed / 10f));
   }
 
-  static int badgeFgTarget(UiState s) { return known(s) && s.speed > s.limit ? INK : WHITE; }
+  static int badgeFgTarget(UiState s) { return badgeFgTarget(s, new Style()); }
+  static int badgeFgTarget(UiState s, Style st) {
+    if (!st.badgeColors || !known(s)) return WHITE;
+    return s.speed > s.limit ? Style.textOn(st.over) : st.okText();
+  }
 
   public void draw(Gfx g, Frame f) {
     UiState s = f.state;
     if (s.view == UiState.View.SEARCH) return;
-    if (f.alarm > 0.002f) drawAlarm(g, f.alarm, s.offline);
-    drawFace(g, f);
-    drawRibbon(g, s);
+    Style st = f.style;
+    if (s.view == UiState.View.FREE && st.unknown == 2) return;            // brak danych i ustawione "nic": puste pole
+    if (f.alarm > 0.002f) drawAlarm(g, f.alarm, s.offline, st);
+    if (!(s.view == UiState.View.FREE && st.unknown == 1)) drawFace(g, f);   // przy "logo auta" znaku nie ma (logo rysuje widok), kółko z prędkością zostaje
+    drawRibbon(g, s, st);
     drawBadge(g, f);
   }
 
   /* ---------- tło ---------- */
 
-  void drawAlarm(Gfx g, float a, boolean offline) {
-    int[] base = offline ? ALARM_COL_ORANGE : ALARM_COL;
+  void drawAlarm(Gfx g, float a, boolean offline, Style st) {
+    int[] base = st.glow(offline);
     int[] c = new int[base.length];
     for (int i = 0; i < c.length; i++) c[i] = scaleAlpha(base[i], a);
+    if (st.glowScale < 0.999f) { g.save(); g.scale(Math.max(0.1f, st.glowScale)); }
     g.fillCircleStops(0, 0, R, ALARM_POS, c);
+    if (st.glowScale < 0.999f) g.restore();
   }
 
   /** Miękki cień koła o promieniu r: jak rozmycie gaussowskie o promieniu blur (połowa krycia na krawędzi, zanik do r + blur). */
@@ -111,13 +166,21 @@ public final class Painter {
 
   void drawFace(Gfx g, Frame f) {
     UiState s = f.state;
-    // cień znaku (jak drop-shadow 0 6 14 w prototypie); przy mandacie dochodzi czerwona poświata wokół znaku
+    Style st = f.style;
+    boolean scaled = Math.abs(st.signScale - 1f) > 0.001f;
+    if (scaled) { g.save(); g.scale(Math.max(0.1f, st.signScale)); }
+    // cień znaku (jak drop-shadow 0 6 14 w prototypie); przy mandacie dochodzi poświata wokół znaku w kolorze akcentu
     softShadow(g, 0, 6, SIGN_D / 2f, 14f, argb(0.5f, 0, 0, 0));
-    if (f.glow > 0.002f) softShadow(g, 0, 0, SIGN_D / 2f, 18f, argb(0.7f * f.glow, 255, 64, 64));
+    if (f.glow > 0.002f) {
+      int ring = st.ring(s.offline);
+      int halo = ring == SIGN_RED ? argb(0.7f * f.glow, 255, 64, 64) : argb(0.7f * f.glow, (ring >> 16) & 255, (ring >> 8) & 255, ring & 255);
+      softShadow(g, 0, 0, SIGN_D / 2f, 18f, halo);
+    }
     g.beginGroup(1f, f.gray);
-    if (s.view == UiState.View.FREE) drawSign(g, "?", 56f, false, SIGN_RED);
-    else drawSign(g, Integer.toString(s.limit), -1f, s.estimated, s.offline ? SIGN_ORANGE : SIGN_RED);
+    if (s.view == UiState.View.FREE) drawSign(g, "?", 56f, false, st.red);
+    else drawSign(g, Integer.toString(s.limit), -1f, s.estimated && st.dashEst, st.ring(s.offline));
     g.endGroup();
+    if (scaled) g.restore();
   }
 
   /**
@@ -141,14 +204,20 @@ public final class Painter {
 
   void drawBadge(Gfx g, Frame f) {
     UiState s = f.state;
+    Style st = f.style;
     boolean vis = s.view == UiState.View.DRIVE || s.view == UiState.View.WEAK || s.view == UiState.View.FREE;
-    if (!vis || s.speed < 0) return;
-    softShadow(g, BADGE_CX, BADGE_CY + 6f, BADGE_R, 14f, argb(0.55f, 0, 0, 0));
-    g.fillCircle(BADGE_CX, BADGE_CY, BADGE_R, WHITE);
-    g.fillCircle(BADGE_CX, BADGE_CY, BADGE_R - BADGE_BORDER, f.badgeBg);
+    if (!st.badge || !vis || s.speed < 0) return;
+    // kółko leży na obwodzie znaku: przy zmianie rozmiaru znaku przesuwa się razem z nim, a własny rozmiar skaluje je wokół jego środka
+    g.save();
+    g.translate(BADGE_CX * st.signScale, BADGE_CY * st.signScale);
+    if (Math.abs(st.badgeScale - 1f) > 0.001f) g.scale(Math.max(0.1f, st.badgeScale));
+    softShadow(g, 0, 6f, BADGE_R, 14f, argb(0.55f, 0, 0, 0));
+    g.fillCircle(0, 0, BADGE_R, WHITE);
+    g.fillCircle(0, 0, BADGE_R - BADGE_BORDER, f.badgeBg);
     String t = Integer.toString(Math.min(999, s.speed));
     float fs = t.length() >= 3 ? 48f : 58f;
-    g.text(t, BADGE_CX, BADGE_CY + 0.35f * fs, fs, f.badgeFg);
+    g.text(t, 0, 0.35f * fs, fs, f.badgeFg);
+    g.restore();
   }
 
   /* ---------- opaska z mandatem ---------- */
@@ -163,16 +232,19 @@ public final class Painter {
    * Układ opaski: największa czcionka kwoty, przy której opaska mieści się w kółku z zapasem
    * (liczone po zaokrąglonych rogach) i nie przekracza 336 jednostek szerokości.
    */
-  public static Ribbon layoutRibbon(Gfx m, int fine, int points) {
+  public static Ribbon layoutRibbon(Gfx m, int fine, int points) { return layoutRibbon(m, fine, points, true); }
+
+  /** Jak wyżej; bez punktów (ustawienie "Punkty karne w opasce") opaska ma tylko kwotę i jest niższa. */
+  public static Ribbon layoutRibbon(Gfx m, int fine, int points, boolean showPts) {
     Ribbon r = new Ribbon();
     r.amt = Penalties.formatPln(fine);
-    r.pts = points + " pkt";
+    r.pts = showPts ? points + " pkt" : "";
     float maxR = R - 11f;
     float fs = 66f;
     while (true) {
-      float wAmt = m.textWidth(r.amt, fs), wPts = m.textWidth(r.pts, fs * 0.7f);
+      float wAmt = m.textWidth(r.amt, fs), wPts = showPts ? m.textWidth(r.pts, fs * 0.7f) : 0f;
       float boxW = Math.max(wAmt, wPts) + 56f + 6f;
-      float boxH = 24f + 1.7f * fs;
+      float boxH = showPts ? 24f + 1.7f * fs : 24f + 1.0f * fs;
       float bottom = RIBBON_TOP + boxH;
       float x = Math.max(0f, boxW / 2f - RIBBON_RHO), y = bottom - RIBBON_RHO;
       boolean fits = (float) Math.hypot(x, y) + RIBBON_RHO <= maxR && boxW <= 336f;
@@ -185,18 +257,25 @@ public final class Painter {
     }
   }
 
-  void drawRibbon(Gfx g, UiState s) {
+  void drawRibbon(Gfx g, UiState s, Style st) {
     if (!s.hasBand()) return;
-    Ribbon r = layoutRibbon(g, s.fine, s.points);
+    Ribbon r = layoutRibbon(g, s.fine, s.points, st.showPts);
+    // opaska wisi pod znakiem: przy innym rozmiarze znaku przesuwa się z nim, własna skala rośnie od jej górnej krawędzi
+    g.save();
+    g.translate(0, RIBBON_TOP * st.signScale);
+    if (Math.abs(st.fineScale - 1f) > 0.001f) g.scale(Math.max(0.1f, st.fineScale));
+    g.translate(0, -RIBBON_TOP);
     // cień (kilka warstw zamiast rozmycia)
     for (int i = 4; i >= 1; i--) {
       g.fillRoundRect(r.left - i * 2, r.top + 8 - i * 2, r.right + i * 2, r.bottom + 8 + i * 2, RIBBON_RHO + i * 2, argb(0.12f, 0, 0, 0));
     }
-    g.fillRoundRect(r.left, r.top, r.right, r.bottom, RIBBON_RHO, AMBER);
+    g.fillRoundRect(r.left, r.top, r.right, r.bottom, RIBBON_RHO, st.over);
     g.strokeRoundRect(r.left + 1.5f, r.top + 1.5f, r.right - 1.5f, r.bottom - 1.5f, RIBBON_RHO - 1.5f, 3f, INK);
+    int ink = Style.textOn(st.over);
     float line1 = r.top + 3f + 8f;
-    g.text(r.amt, 0, line1 + 0.84f * r.fs, r.fs, INK);
-    g.text(r.pts, 0, line1 + r.fs + 3f + 0.84f * (r.fs * 0.7f), r.fs * 0.7f, INK);
+    g.text(r.amt, 0, line1 + 0.84f * r.fs, r.fs, ink);
+    if (st.showPts) g.text(r.pts, 0, line1 + r.fs + 3f + 0.84f * (r.fs * 0.7f), r.fs * 0.7f, ink);
+    g.restore();
   }
 
   /* ---------- narzędzia ---------- */

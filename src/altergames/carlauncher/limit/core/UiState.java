@@ -21,6 +21,8 @@ public final class UiState {
   public final boolean stale;
   /** Limit z danych lokalnych bez potwierdzenia na żywo (brak internetu albo nieświeże dane): pierścień znaku jest pomarańczowy zamiast czerwonego. */
   public final boolean offline;
+  /** Limit szacowany z wyłączonymi ostrzeżeniami: bez oceny koloru kółka, mandatu i poświaty (tylko znak). */
+  public final boolean muted;
 
   public UiState(View view, int limit, boolean estimated, int speed, boolean severe,
                  int fine, int points, boolean stale) {
@@ -29,7 +31,13 @@ public final class UiState {
 
   public UiState(View view, int limit, boolean estimated, int speed, boolean severe,
                  int fine, int points, boolean stale, boolean offline) {
+    this(view, limit, estimated, speed, severe, fine, points, stale, offline, false);
+  }
+
+  public UiState(View view, int limit, boolean estimated, int speed, boolean severe,
+                 int fine, int points, boolean stale, boolean offline, boolean muted) {
     this.offline = offline;
+    this.muted = muted;
     this.view = view;
     this.limit = limit;
     this.estimated = estimated;
@@ -48,7 +56,7 @@ public final class UiState {
     if (!(o instanceof UiState)) return false;
     UiState u = (UiState) o;
     return view == u.view && limit == u.limit && estimated == u.estimated && speed == u.speed
-        && severe == u.severe && fine == u.fine && points == u.points && stale == u.stale && offline == u.offline;
+        && severe == u.severe && fine == u.fine && points == u.points && stale == u.stale && offline == u.offline && muted == u.muted;
   }
 
   @Override public int hashCode() { return view.hashCode() * 31 + limit * 7 + speed; }
